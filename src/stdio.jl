@@ -89,6 +89,7 @@ function watch_stream(rd::IO, name::AbstractString)
                 if stdio_bytes[] >= max_output_per_request[]
                     read(rd, nb) # read from libuv/os buffer and discard
                     if stdio_bytes[] - nb < max_output_per_request[]
+                        # TODO DA
                         send_ipython(publish[], msg_pub(execute_msg, "stream",
                                      Dict("name" => "stderr", "text" => "Excessive output truncated after $(stdio_bytes[]) bytes.")))
                     end
@@ -160,6 +161,7 @@ function send_stream(name::AbstractString)
             print(sbuf, '\n')
             s = String(take!(sbuf))
         end
+        # TODO DA
         send_ipython(publish[],
              msg_pub(execute_msg, "stream",
                      Dict("name" => name, "text" => s)))
@@ -192,6 +194,7 @@ and return the string entered by the user.  If `password`
 is `true`, the user's input is not displayed during typing.
 """
 function readprompt(prompt::AbstractString; password::Bool=false)
+    # TODO DA
     if !execute_msg.content["allow_stdin"]
         error("IJulia: this front-end does not implement stdin")
     end
@@ -255,9 +258,9 @@ function watch_stdio()
 end
 
 function flush_all()
-    flush_cstdio() # flush writes to stdout/stderr by external C code
-    flush(stdout)
-    flush(stderr)
+    Base.Libc.flush_cstdio() # flush writes to stdout/stderr by external C code
+    flush(Main.stdout)
+    flush(Main.stderr)
 end
 
 function oslibuv_flush()
