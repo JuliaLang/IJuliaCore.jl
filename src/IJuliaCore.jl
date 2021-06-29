@@ -4,7 +4,7 @@ module IJuliaCore
 # Debugging IJulia
 
 # in the Jupyter front-end, enable verbose output via IJulia.set_verbose()
-verbose = IJULIA_DEBUG
+verbose = false
 """
     set_verbose(v=true)
 
@@ -28,7 +28,7 @@ however, it can be more convenient to *not* capture stdout and stderr output
 `IJulia.jl` to set `capture_stderr` and/or `capture_stdout` to `false`.
 """
 const capture_stdout = true
-const capture_stderr = !IJULIA_DEBUG
+const capture_stderr = true
 
 
 include("init.jl")
