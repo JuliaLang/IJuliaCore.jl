@@ -4,13 +4,14 @@
 # create a wrapper type around redirected stdio streams,
 # both for overloading things like `flush` and so that we
 # can set properties like `color`.
-struct IJuliaStdio{IO_t <: IO} <: Base.AbstractPipe
+struct IJuliaStdio{IO_t <: IO,F} <: Base.AbstractPipe
     io::IOContext{IO_t}
+    send_callback::F
 end
-IJuliaStdio(io::IO, stream::AbstractString="unknown") =
-    IJuliaStdio{typeof(io)}(IOContext(io, :color=>Base.have_color,
+IJuliaStdio(io::IO, send_callback, stream::AbstractString="unknown") =
+    IJuliaStdio{typeof(io),typeof(send_callback)}(IOContext(io, :color=>Base.have_color,
                             :jupyter_stream=>stream,
-                            :displaysize=>displaysize()))
+                            :displaysize=>displaysize()), send_callback)
 Base.pipe_reader(io::IJuliaStdio) = io.io.io
 Base.pipe_writer(io::IJuliaStdio) = io.io.io
 Base.lock(io::IJuliaStdio) = lock(io.io.io)
@@ -76,7 +77,7 @@ when buffer contains more than `max_bytes` bytes. Otherwise, if data is availabl
 `stream_interval` seconds (see the Timers set up in watch_stdio). Truncate the output to `max_output_per_request`
 bytes per execution request since excessive output can bring browsers to a grinding halt.
 """
-function watch_stream(rd::IO, name::AbstractString)
+function watch_stream(rd::IO, name::AbstractString, send_callback)
     task_local_storage(:IJulia_task, "read $name task")
     try
         buf = IOBuffer()
@@ -89,9 +90,7 @@ function watch_stream(rd::IO, name::AbstractString)
                 if stdio_bytes[] >= max_output_per_request[]
                     read(rd, nb) # read from libuv/os buffer and discard
                     if stdio_bytes[] - nb < max_output_per_request[]
-                        # TODO DA
-                        send_ipython(publish[], msg_pub(execute_msg, "stream",
-                                     Dict("name" => "stderr", "text" => "Excessive output truncated after $(stdio_bytes[]) bytes.")))
+                        send_callback("stderr", "Excessive output truncated after $(stdio_bytes[]) bytes.")
                     end
                 else
                     write(buf, read(rd, nb))
@@ -100,7 +99,7 @@ function watch_stream(rd::IO, name::AbstractString)
             if buf.size > 0
                 if buf.size >= max_bytes
                     #send immediately
-                    send_stream(name)
+                    send_stream(name, send_callback)
                 end
             end
         end
@@ -108,22 +107,19 @@ function watch_stream(rd::IO, name::AbstractString)
         # the IPython manager may send us a SIGINT if the user
         # chooses to interrupt the kernel; don't crash on this
         if isa(e, InterruptException)
-            watch_stream(rd, name)
+            watch_stream(rd, name, send_callback)
         else
             rethrow()
         end
     end
 end
 
-function send_stdio(name)
+function send_stdio(name, send_callback)
     if verbose::Bool && !haskey(task_local_storage(), :IJulia_task)
         task_local_storage(:IJulia_task, "send $name task")
     end
-    send_stream(name)
+    send_stream(name, send_callback)
 end
-
-send_stdout(t::Timer) = send_stdio("stdout")
-send_stderr(t::Timer) = send_stdio("stderr")
 
 """
 Jupyter associates cells with message headers. Once a cell's execution state has
@@ -139,7 +135,7 @@ function set_cur_msg(msg)
     global execute_msg = msg
 end
 
-function send_stream(name::AbstractString)
+function send_stream(name::AbstractString, send_callback)
     buf = bufs[name]
     if buf.size > 0
         d = take!(buf)
@@ -161,10 +157,7 @@ function send_stream(name::AbstractString)
             print(sbuf, '\n')
             s = String(take!(sbuf))
         end
-        # TODO DA
-        send_ipython(publish[],
-             msg_pub(execute_msg, "stream",
-                     Dict("name" => name, "text" => s)))
+        send_callback(name, s)
     end
 end
 
@@ -243,17 +236,17 @@ function readline(io::IJuliaStdio)
     end
 end
 
-function watch_stdio()
+function watch_stdio(send_callback)
     task_local_storage(:IJulia_task, "init task")
     if capture_stdout
-        read_task = @async watch_stream(read_stdout[], "stdout")
+        read_task = @async watch_stream(read_stdout[], "stdout", send_callback)
         #send stdout stream msgs every stream_interval secs (if there is output to send)
-        Timer(send_stdout, stream_interval, interval=stream_interval)
+        Timer(t -> send_stdio("stdout", send_callback), stream_interval, interval=stream_interval)
     end
     if capture_stderr
-        readerr_task = @async watch_stream(read_stderr[], "stderr")
+        readerr_task = @async watch_stream(read_stderr[], "stderr", send_callback)
         #send STDERR stream msgs every stream_interval secs (if there is output to send)
-        Timer(send_stderr, stream_interval, interval=stream_interval)
+        Timer(t -> send_stdio("stderr", send_callback), stream_interval, interval=stream_interval)
     end
 end
 
@@ -277,5 +270,5 @@ import Base.flush
 function flush(io::IJuliaStdio)
     flush(io.io)
     oslibuv_flush()
-    send_stream(get(io,:jupyter_stream,"unknown"))
+    send_stream(get(io, :jupyter_stream, "unknown"), io.send_callback)
 end
