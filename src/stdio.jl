@@ -39,7 +39,6 @@ end
 # logging in verbose mode goes to original stdio streams.  Use macros
 # so that we do not even evaluate the arguments in no-verbose modes
 
-using Printf
 function get_log_preface()
     t = now()
     taskname = get(task_local_storage(), :IJulia_task, "")
