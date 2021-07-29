@@ -22,7 +22,7 @@ function limitstringmime(mime::MIME, x)
             show(InlineIOContext(buf), mime, x)
         end
     else
-        b64 = Base64EncodePipe(buf)
+        b64 = Base64.Base64EncodePipe(buf)
         if isa(x, Vector{UInt8})
             write(b64, x) # x assumed to be raw binary data
         else
